@@ -55,12 +55,16 @@ def youtube_search_large(query: str, page: int = 1, limit_per_page: int = 30):
             page_entries = results['entries'][start_index:end_index]
             
             for entry in page_entries:
+                # FIX: Handle NoneType duration for live streams and upcoming premieres safely
+                raw_duration = entry.get('duration')
+                duration_val = float(raw_duration) if raw_duration is not None else 0.0
+
                 videos.append({
                     "video_id": entry.get('id'),
                     "title": entry.get('title'),
                     "thumbnail": entry.get('thumbnail'), # If null, app should use default
                     "url": f"https://www.youtube.com/watch?v={entry.get('id')}",
-                    "duration": float(entry.get('duration', 0))
+                    "duration": duration_val
                 })
         return videos
 
