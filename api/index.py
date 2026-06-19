@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import os
 import random
+from functools import lru_cache # 🟢 Caching import
 
 app = FastAPI()
 
@@ -29,7 +30,6 @@ class VideoSave(BaseModel):
     title: str
     tags: List[str]
 
-# Optimized YDL Options for speed and more data
 YDL_OPTIONS = {
     'format': 'best',
     'quiet': True,
@@ -37,10 +37,9 @@ YDL_OPTIONS = {
     'extract_flat': True, 
 }
 
-# --- Helper Function for Large Scale Search ---
-def youtube_search_large(query: str, page: int = 1, limit_per_page: int = 30):
-    # ইউটিউবে যত বেশি রেজাল্ট চাই, তত বেশি লিমিট দিতে হয়
-    # পেজ ১ এর জন্য ০-৩০, পেজ ২ এর জন্য ৩১-৬০ ইত্যাদি
+# 🟢 Caching added to make it incredibly fast!
+@lru_cache(maxsize=100)
+def youtube_search_large(query: str, page: int = 1, limit_per_page: int = 15): # 🟢 Limit reduced to 15 for faster fetch
     total_needed = page * limit_per_page
     
     with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
@@ -49,28 +48,23 @@ def youtube_search_large(query: str, page: int = 1, limit_per_page: int = 30):
         
         videos = []
         if 'entries' in results:
-            # শুধুমাত্র বর্তমান পেজের ভিডিওগুলো স্লাইস করে নেওয়া
             start_index = (page - 1) * limit_per_page
             end_index = page * limit_per_page
             page_entries = results['entries'][start_index:end_index]
             
             for entry in page_entries:
-                # FIX: Handle NoneType duration for live streams and upcoming premieres safely
                 raw_duration = entry.get('duration')
                 duration_val = float(raw_duration) if raw_duration is not None else 0.0
 
                 videos.append({
                     "video_id": entry.get('id'),
                     "title": entry.get('title'),
-                    "thumbnail": entry.get('thumbnail'), # If null, app should use default
+                    "thumbnail": entry.get('thumbnail'), 
                     "url": f"https://www.youtube.com/watch?v={entry.get('id')}",
                     "duration": duration_val
                 })
         return videos
 
-# --- API Endpoints ---
-
-# ১. Search: আনলিমিটেড ফিলিংয়ের জন্য পেজিনেশন যুক্ত
 @app.get("/search")
 async def search_videos(
     q: str = Query(..., description="Search keyword"), 
@@ -78,8 +72,6 @@ async def search_videos(
 ):
     try:
         results = youtube_search_large(q, page=page)
-        
-        # আপনার দেওয়া স্যাম্পল JSON ফরম্যাটে রেসপন্স
         return {
             "status": "success", 
             "query": q, 
@@ -89,7 +81,6 @@ async def search_videos(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ২. Endless Feed: ইউজারের পছন্দের উপর ভিত্তি করে অটো-ফেচ
 @app.get("/feed/{user_id}")
 async def get_endless_feed(user_id: str, page: int = 1):
     try:
@@ -114,7 +105,6 @@ async def get_endless_feed(user_id: str, page: int = 1):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ৩. Direct Info & Download Link
 @app.get("/info")
 async def get_info(url: str):
     try:
@@ -130,7 +120,6 @@ async def get_info(url: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# ৪. Playlist Tracking
 @app.post("/playlist/add")
 async def add_to_playlist(video: VideoSave):
     try:
